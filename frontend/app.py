@@ -2,22 +2,22 @@ import streamlit as st
 import requests
 import pandas as pd
 
-st.set_page_config(page_title="SHL GenAI Recommender", layout="centered")
-st.title("🎯 SHL GenAI Assessment Recommendation")
+st.set_page_config("SHL RAG Recommender", layout="centered")
+st.title("🤖 SHL GenAI Assessment Recommender")
 
-query = st.text_area("Enter a Job Description or Query")
+query = st.text_area("Enter a job description or hiring requirement:")
 
 if st.button("Recommend"):
     if not query.strip():
-        st.warning("Please enter a valid query.")
+        st.warning("Please enter something first.")
     else:
-        with st.spinner("Retrieving recommendations..."):
-            response = requests.post("http://localhost:8000/recommend", json={"query": query})
-            result = response.json()
+        with st.spinner("Thinking..."):
+            res = requests.post("http://localhost:8000/recommend", json={"query": query})
+            data = res.json()
 
-            st.subheader("🔎 Top Retrieved Assessments")
-            df = pd.DataFrame(result["retrieved"])
+            st.subheader("🔍 Top Retrieved Assessments")
+            df = pd.DataFrame(data["recommendations"])
             st.dataframe(df)
 
-            st.subheader("💡 AI-Generated Recommendation")
-            st.markdown(result["generated_answer"])
+            st.subheader("💡 AI-Powered Recommendation")
+            st.markdown(data["generated_answer"])

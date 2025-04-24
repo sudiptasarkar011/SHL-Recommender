@@ -6,20 +6,15 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 import httpx
 import os
-from dotenv import load_dotenv  # Add this import
+from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 app = FastAPI()
-
-# Load models/data
-model = SentenceTransformer("all-MiniLM-L6-v2")
+model = SentenceTransformer('all-MiniLM-L6-v2')
 df = pd.read_pickle("shl_data.pkl")
 index = faiss.read_index("shl_index.faiss")
-
-# Optional: from .env
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 class QueryRequest(BaseModel):
     query: str
@@ -35,26 +30,22 @@ async def recommend(query_data: QueryRequest):
     D, I = index.search(np.array(query_embedding), 10)
     retrieved = df.iloc[I[0]].to_dict(orient="records")
 
-    prompt = f"""You are an assessment advisor.
-A recruiter gave the following hiring need:\n\n"{query}"
+    prompt = f"""
+You are an SHL assessment advisor.
+The recruiter wrote: "{query}"
 
-Here are 10 SHL assessments that could match:
+Based on this, choose the best 3–5 assessments from this list:
 {retrieved}
 
-Based on the query, recommend 3–5 best fitting assessments and explain why they are suitable.
-Respond in bullet points."""
+Explain your reasoning in simple bullet points.
+"""
 
-    # Call Gemini API
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
             params={"key": GEMINI_API_KEY},
             json={"contents": [{"parts": [{"text": prompt}]}]}
         )
-        result = response.json()
-        answer = result['candidates'][0]['content']['parts'][0]['text']
+        answer = response.json()['candidates'][0]['content']['parts'][0]['text']
 
-    return {
-        "retrieved": retrieved,
-        "generated_answer": answer
-    }
+    return {"recommendations": retrieved, "generated_answer": answer}

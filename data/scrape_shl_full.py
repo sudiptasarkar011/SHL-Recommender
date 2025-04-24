@@ -1,64 +1,73 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import pandas as pd
-import time
 import requests
-
-# Setup headless Chrome
-options = Options()
-options.add_argument("--headless")
-options.add_argument("--disable-gpu")
-driver = webdriver.Chrome(options=options)
-
-# Step 1: Open the main catalog page
-catalog_url = "https://www.shl.com/solutions/products/product-catalog/"
-driver.get(catalog_url)
-time.sleep(5)
-
-# Scroll to bottom to load all products
-for _ in range(5):
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    time.sleep(2)
-
-# Get the rendered HTML and close driver
-catalog_html = driver.page_source
-driver.quit()
-
-# Step 2: Parse catalog page
-soup = BeautifulSoup(catalog_html, "html.parser")
-cards = soup.find_all("div", class_="shl-card")
 
 assessments = []
 
-print(f"🔍 Found {len(cards)} assessments on catalog page")
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=False)  # Set to True to run invisibly
+    page = browser.new_page()
 
-# Step 3: Visit each test URL to extract full details
+    print("🌐 Navigating to SHL catalog...")
+    page.goto(
+        "https://www.shl.com/solutions/products/product-catalog/",
+        wait_until='networkidle',
+        timeout=60000
+    )
+
+    # Scroll multiple times to load all content
+    for _ in range(6):
+        page.mouse.wheel(0, 10000)
+        page.wait_for_timeout(3000)
+
+    # Try waiting for one known element from a tile
+    try:
+        page.wait_for_selector("div.shl-card", timeout=10000)
+        print("✅ Assessment tiles loaded.")
+    except Exception:
+        print("❌ Timeout: 'shl-card' elements did not appear.")
+        content = page.content()
+        with open("debug_page.html", "w", encoding="utf-8") as f:
+            f.write(content)
+        browser.close()
+        exit()
+
+    content = page.content()
+    browser.close()
+
+# Now use BeautifulSoup to parse all loaded HTML
+soup = BeautifulSoup(content, "html.parser")
+cards = soup.find_all("div", class_="shl-card")
+
+print(f"🔍 Found {len(cards)} assessments")
+
+# Extract and enrich metadata
 for card in cards:
     try:
         name = card.find("div", class_="shl-card-title").text.strip()
-        relative_url = card.find("a")["href"]
-        full_url = f"https://www.shl.com{relative_url}"
+        link = card.find("a")["href"]
+        full_url = f"https://www.shl.com{link}"
 
-        # Visit the assessment detail page
+        # Visit individual test page to extract more info
         res = requests.get(full_url)
-        detail_soup = BeautifulSoup(res.text, "html.parser")
+        detail = BeautifulSoup(res.text, "html.parser")
+        page_text = res.text.lower()
 
-        # Extract duration, adaptive, and remote support (heuristics)
-        duration_text = detail_soup.find(string=lambda s: "minute" in s.lower() or "min" in s.lower())
-        duration = duration_text.strip() if duration_text else "Unknown"
+        # Extract fields
+        duration = detail.find(string=lambda s: s and "minute" in s.lower())
+        duration = duration.strip() if duration else "Unknown"
 
-        supports_adaptive = "Yes" if "adaptive" in res.text.lower() or "IRT" in res.text else "No"
-        supports_remote = "Yes" if "remote" in res.text.lower() or "proctored" in res.text.lower() else "No"
+        adaptive = "Yes" if "adaptive" in page_text or "irt" in page_text else "No"
+        remote = "Yes" if "remote" in page_text or "proctor" in page_text else "No"
 
-        # Heuristic test type based on keywords
-        if any(word in name.lower() for word in ["cognitive", "reasoning", "logic"]):
+        if any(kw in name.lower() for kw in ["cognitive", "reasoning", "logic"]):
             test_type = "Cognitive"
-        elif any(word in name.lower() for word in ["personality", "behavior", "trait"]):
+        elif any(kw in name.lower() for kw in ["personality", "behavior", "trait"]):
             test_type = "Personality"
-        elif any(word in name.lower() for word in ["developer", "coding", "java", "python", "sql"]):
+        elif any(kw in name.lower() for kw in ["developer", "java", "python", "sql", "coding"]):
             test_type = "Technical"
-        elif any(word in name.lower() for word in ["communication", "leadership", "management", "sales"]):
+        elif any(kw in name.lower() for kw in ["communication", "sales", "leadership"]):
             test_type = "Soft Skills"
         else:
             test_type = "Unknown"
@@ -66,19 +75,19 @@ for card in cards:
         assessments.append({
             "name": name,
             "url": full_url,
-            "remote_support": supports_remote,
-            "adaptive_support": supports_adaptive,
+            "remote_support": remote,
+            "adaptive_support": adaptive,
             "duration": duration,
             "test_type": test_type
         })
 
-        print(f"✅ Scraped: {name}")
+        print(f"✅ {name}")
 
     except Exception as e:
-        print(f"⚠️ Failed to process a card: {e}")
+        print(f"⚠️ Skipped one due to: {e}")
         continue
 
-# Step 4: Save to CSV
+# Save the dataset
 df = pd.DataFrame(assessments)
 df.to_csv("assessments.csv", index=False)
-print("📁 Saved data to assessments.csv")
+print("📁 Saved to assessments.csv")

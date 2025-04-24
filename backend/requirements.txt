@@ -1,8 +1,8 @@
 fastapi
 uvicorn
+sentence-transformers
 faiss-cpu
 pandas
 numpy
-sentence-transformers
-httpx  # for calling Gemini
-python-dotenv  # optional: for storing API key securely
+httpx
+python-dotenv
